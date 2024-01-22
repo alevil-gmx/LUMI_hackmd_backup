@@ -1,9 +1,11 @@
 # Running molecular dynamics simulations with GROMACS on LUMI
 
-## Introduction
-==CB:Write an introductiory paragraph about the aim of the tutorial and some information about LUMI?==
+**Authors: Szilárd Páll and Andrey Alekseenko**
+(adapted from [doi:10.6084/m9.figshare.22303477](https://doi.org/10.6084/m9.figshare.22303477))
 
-==CB: I feel like goals shouldn't be formulated in present continuous form so I changed that. Feel free to change back if you don't agree! AV Usually ILOs are in future tense, goals/purpuses in to + infinitive==
+## Introduction
+[\\]: # (CB:Write an introductiory paragraph about the aim of the tutorial and some information about LUMI?)
+
 :::success 
 :dart: **Learning goals**
 * Get familiar with the GROMACS tools used in the exercises.
@@ -11,40 +13,36 @@
 * Understand key parts of the `mdrun` log file structure.
 :::
 
-Authors: Szilárd Páll and Andrey Alekseenko (adaped from [doi:10.6084/m9.figshare.22303477](https://doi.org/10.6084/m9.figshare.22303477))
-
-Software: GROMACS-2023.3
+Software: GROMACS 2023
 
 [//]: # (### Performance in MD)
 [//]: # (Molecular dynamics simulations do the same calculation repeatedly, typically for a large number of time-steps. )
 
 ### The GROMACS simulation engine 
 
-GROMACS is a molecular simulation package which comes with a molecular dynamics simulation engine (`mdrun`), a set of analysis tools, and the gmxlib Python API. 
+[GROMACS](https://www.gromacs.org) is a molecular simulation package which comes with a molecular dynamics simulation engine (`mdrun`), a set of analysis tools, and the gmxlib Python API. 
 
-GROMACS is highly flexible and can be built in various ways depending on the target harware architecture and the parallelization features enabled. The GROMACS features and dependencies enabled at compile-time are shown in the _version header_ which is listed by invoking the `gmx -version` command as well as at the top of the simulation log outputs. All functionalities of the GROMACS package, the simulation engine and tools, are provided in the `gmx` program through subcommands. The program can have suffixes, e.g. MPI builds are typically installed as `gmx_mpi`.
+GROMACS is highly flexible and can be built in various ways depending on the target hardware architecture and the parallelization features enabled. The GROMACS features and dependencies enabled at compile-time are shown in the _version header_ which is listed by invoking the `gmx -version` command as well as at the top of the simulation log outputs. All functionalities of the GROMACS package, the simulation engine and tools, are provided in the `gmx` program through subcommands. The program can have suffixes, e.g. MPI builds are typically installed as `gmx_mpi`.
 
-==CB: Maybe add a link to the GROMACS manual or installation instructions here?==
-==CB: Maybe write something like: "In this tutorial, we will use a version of GROMACS that has already been built on the LUMI-G cluster, but if you wish to install GROMACS on your own system, instructions for many different hardware configurations are available at [GROMACS documention]."==
+In this tutorial, we will use a version of GROMACS that has already been built on the LUMI-G cluster, but if you wish to install GROMACS on your own system, instructions for many different hardware configurations are available at [GROMACS documentation](https://manual.gromacs.org/current/install-guide/index.html).
 
 #### GROMACS parallelization overview
 
-Parallelization of MD simulation requires _expressing_ concurrent work (multiple computations happening at the same time) and _exposing_ it using an implementation with the help of a parallel programming model. To express concurrency within a single simulation in GROMACS we can divide the work using data (e.g. spatial decomposition algorithms), task (e.g. rank specialization for the "separate PME ranks" feature), or ensemble decomposition. The exposed concurrent work can then be mapped to various processing units, like CPU cores or GPU accelerators. GROMACS realies on a hierarchical heterogeneous parallelization using MPI, OpenMP multi-threading, CUDA/SYCL/OpenCL for asynchronous GPU execution, and SIMD for low-level CPU and GPU algorithms.
+Parallelization of MD simulation requires _expressing_ concurrent work (multiple computations happening at the same time) and _exposing_ it using an implementation with the help of a parallel programming model. To express concurrency within a single simulation in GROMACS we can divide the work using data (e.g. spatial decomposition algorithms), task (e.g. rank specialization for the "separate PME ranks" feature), or ensemble decomposition. The exposed concurrent work can then be mapped to various processing units, like CPU cores or GPU accelerators. GROMACS relies on a hierarchical heterogeneous parallelization using MPI, OpenMP multi-threading, CUDA/SYCL/OpenCL for asynchronous GPU execution, and SIMD for low-level CPU and GPU algorithms.
 
-The data parallelism is used for implementing spatial decomposition (that consist of dividing the production system into subsystems that are as independent as possible) and takes place
+The data parallelism is used for implementing spatial decomposition (that consist of dividing the simulation system into parts that are as independent as possible) and takes place
 across MPI ranks using multi-threading on CPUs and fine-grained SIMD-style algorithms (Single Instruction Multiple Data). At the same time, task parallelism is at the heart of the heterogeneous GPU engine and it is also what enables scaling the PME algorithm efficiently by employing [rank specialization](https://manual.gromacs.org/documentation/current/user-guide/mdrun-performance.html#separate-pme-ranks).
 
-MD simulation studies can be classified into two major flavors: a single (or a few) long trajectory or larger set of trajectories. Due to the timescale of some biological processes,
-a single/few very long trajectories might not be enough (and inefficient) to sample the conformational space. Then, an alternative is to use an ensemble of simulations. 
+MD simulation studies can be classified into two major flavors: those that use a single (or a few) long trajectory, and those realying on a larger set of trajectories. Due to the timescale of some biological processes,
+a single/few very long trajectories might not be enough (and/or it is inefficient) to sample the conformational space. Then, an alternative is to use an ensemble of simulations. 
 
-A wide range of algorithms, from free energy perturbation to replica exchange to the accelerated weight histogram method (AWH), rely on (or require) multiple MD simulations which form an _ensemble_. An _ensemble simulation_ refers to a set of simulations, where each individual simulation is referred to as _ensemble member_ (called "replica" in replica-exchange and walker in AWH). These algorithms provide a source of concurrent work, which simulation workflows can use to parallelize over, and require different levels of coupling between the ensemble members. E.g., standard free-energy calculations (with a pre-determined simulation length) requires no communication across the ensemble members, whereas replica-exchange and AWH require exchange of information at regular time intervals. The latter class of methods is referred to as _coupled_ ensembles. Depending on the frequency of data exchange, ensembles can be _weakly_ or _strongly_ coupled (with infrequent or frequent data exchange, resp.). Coupled ensembles are more performance sensitive, hence more prone to be influenced by imbalance (e.g. member simulations running with different throughput). The stronger the coupling the more sensitive the ensemble simulation is to performance bottlenecks.
-
+A wide range of algorithms, from free energy perturbation to replica exchange to the accelerated weight histogram method (AWH), rely on (or require) multiple MD simulations which form an _ensemble_. An _ensemble simulation_ refers to a set of simulations, where each individual simulation is referred to as _ensemble member_ (called "replica" in replica-exchange and walker in AWH). These algorithms provide a source of concurrent work, which simulation workflows can use to parallelize over, and require different levels of coupling between the ensemble members. E.g., standard free-energy calculations (with a pre-determined simulation length) require no communication across the ensemble members, whereas replica-exchange and AWH require exchange of information at regular time intervals. The latter class of methods is referred to as _coupled_ ensembles. Depending on the frequency of data exchange, ensembles can be _weakly_ or _strongly_ coupled (with infrequent or frequent data exchange, resp.). Coupled ensembles are more performance sensitive, hence more prone to be influenced by imbalance (e.g. member simulations running with different throughput). The stronger the coupling the more sensitive the ensemble simulation is to performance bottlenecks.
 
 #### The `mdrun` simulation tool
 
 In GROMACS, the primary way to run simulations across CPUs and GPUs is to use the command line program `mdrun`. The simulation tool `mdrun` can be invoked as a subcommand of the main program, e.g. `gmx mdrun`. The `mdrun` functionalities available in a specific build depend on the options GROMACS was configured with and can be seen in the version header.
 
-The following list contains the central performance-related command line options used in this tutorial:
+The following list contains key performance-related command line options used in this tutorial:
 * `-g LOGFILE` set a custom name for the log file (default `md.log`);
 * `-pin on` enable `mdrun` internal thread affinity setting (might override externally set affinities). Note on LUMI externally set affinities are recommended or [the LUMI documentation](https://docs.lumi-supercomputer.eu/runjobs/scheduled-jobs/distribution-binding/);
 * `-tunepme`/`-notunepme` enable PME task load balancing;
@@ -54,64 +52,59 @@ The following list contains the central performance-related command line options
 - `-nb`/`-pme`/`-bonded`/`-update` task assignment options used to select tasks to run on either CPU or GPU. 
 - `-npme N` set the number of separate ranks to be used for PME (N=-1 is a guess)
 
-==AV to AA/SP what about to add the following sentences:  "Note that some performance features can be triggered using environment variables. See examples in [exercise 3.2](https://hackmd.io/qvLmXFLCQGScOHhdjS5uQw?both#Exercise-32-Separate-PME-rank-with-direct-GPU-communication)"" == 
+Note that some performance features require using environment variables; see examples in [exercise 3.2](#Exercise-32-Separate-PME-rank-with-direct-GPU-communication). Documentation for these can be found in the [GROMACS user guide](https://manual.gromacs.org/current/user-guide/environment-variables.html).
 
 For further information on the `mdrun` simulation tool command line options and features, see the [online documentation](https://manual.gromacs.org/current/onlinehelp/gmx-mdrun.html).
 
 
 #### The `mdrun` log file
 
-==CB: The figures need more explaining. There are also multiple versions of the same figures.==
-
 The log file of the `mdrun` simulation engine contains extensive information about the GROMACS build, hardware detected at runtime, complete set of simulation setting, diagnostic output related to the run and its performance, as well as physics and performance statistics.
 
-The version header in a GROMACS `mdrun` log ==AV to AV change picture to 1MPI/1GPU==:
-![Picture1bisbis](https://hackmd.io/_uploads/rycDUsYdT.jpg)
+The version header in a GROMACS `mdrun` log: 
+![logfile-1](https://hackmd.io/_uploads/HJqUaejF6.jpg)
+
+The version header contains GROMACS version and the command line used for the current run (highlighted). It also contains additional information, like where GROMACS is installed and how it was compiled.
 
 The hardware detection section of the `mdrun` log:
-![Picture2](https://hackmd.io/_uploads/SkM9l9cua.png)
+![logfile-2](https://hackmd.io/_uploads/HJL-k-stp.jpg)
 
-![](https://i.imgur.com/68AWSW1.png)
+This section contains the detailed information about the hardware GROMACS is running on. The first line is a brief summary of the available resources (number of nodes, CPU cores and GPUs), followed by additional details: CPU architecture, CPU topology, and the list of the GPUs.
 
-The performance accounting in a multi-rank simulation:
+The performance accounting in the `mdrun` file:
+![logfile-3](https://hackmd.io/_uploads/BkkW4WsKT.jpg)
 
-![Picture3](https://hackmd.io/_uploads/S1BAS95_a.jpg)![Picture4](https://hackmd.io/_uploads/BkMr_cc_p.png)
+This section is printed at the end of the run. The table contains breakdown of the total run time per different kinds of activity. One can see the "Wall time" taken by each activity, as well as its percentage with regard to the total simulation time. Under the table one can find the absolute simulation performance (ns/day).
 
-
-
-![](https://i.imgur.com/PUlYmaR.png)
-
-
-## Simulation input system
+## Simulation input systems
 
 In the following exercises, we will use two different simulation systems: 
 * large-sized [satellite tobacco mosaic virus, STMV](https://en.wikipedia.org/wiki/Tobacco_virtovirus_1) (~ 1 milion atoms) system solvated in a box of TIP3P water molecules, using the CHARMM27 force field.
 
 [//]: # (Comment 1066628 atoms, 2 fs time-step, 1.2 nm cut-offs, h-bond constraints, 0.15 nm PME grid spacing, NVT ensemble.)
 
-* medium-sized [aquaporin membrane protein](https://en.wikipedia.org/wiki/Aquaporin), a tetrameric ion channel (~110000 atoms) embedded in a lipid bilayer and solvated in a box of TIP3P water using the CHARMM36 force field. We will use the Accelerated Weight Histogram (AWH) algorithm with 32 walkers to enhance sampling of the simulations
-==CB:What specifically will be enhanced in AWH?==
+* medium-sized [aquaporin membrane protein](https://en.wikipedia.org/wiki/Aquaporin), a tetrameric ion channel (~110000 atoms) embedded in a lipid bilayer and solvated in a box of TIP3P water using the CHARMM36 force field. We will use the Accelerated Weight Histogram (AWH) algorithm with 32 walkers.
 
 [//]: # (Comment 2.5 fs time-step, 1.2 nm cut-offs, 0.1125   nm PME grid spacing, h-bond constraints, NPT ensemble.)
 
-Both systems have previously been used to benchmark GROMACS heterogenous parallelization and acceleration (https://doi.org/10.1063/5.0018516). 
+Both systems have previously been used to benchmark GROMACS heterogeneous parallelization and acceleration (https://doi.org/10.1063/5.0018516). 
 
-The simulation input files (tpr) can be obtained from:
+The simulation input files (including tpr) can be obtained from:
 
-==AV comment to SP: not sure that they are consistent with LUMI files [STMV](https://kth-my.sharepoint.com/:u:/g/personal/pszilard_ug_kth_se/EZUGKtf30vlOtMtjyjpjGVwBGOXCNEIkcp2BFoZDzme5gQ) [Aquaporin](https://kth-my.sharepoint.com/:u:/g/personal/pszilard_ug_kth_se/Eawzt6R9hrlPjub4ZXBYOVMBPKdx0ZNRn0G4GSLG6ndYiA)==
-
-* [workshop input files](https://a3s.fi/gmx-lumi/workshop-input-files.tar.gz)
+* [Aquaporin](https://a3s.fi/gmx-lumi/aqp-240122.tar.gz)
+* [STMV](https://a3s.fi/gmx-lumi/stmv-240122.tar.gz)
 * or in the folder `/projappl/project_465000934` on LUMI
+
+In exercises 1-3. start with the STMV input, while for exercise 4 Aquaporin. If time allows, feel free to experiment with the other input too.
 
 ## 1. Running your first jobs on LUMI-G
 
-In this first exercise, we will submit our initial jobs on LUMI-G and explore key features and peculiarities of the LUMI system, scheduler, and GROMACS' `mdrun` simulation tool. As simulation system we use the satellite tobacco mosaic virus, STMV. You find the input file in the folder `/projappl/project_465000934/stmv` on LUMI 
-==AV to check that the directory path is correct)==
+In this first exercise, we will submit our initial jobs on LUMI-G and explore key features and peculiarities of the LUMI system, scheduler, and GROMACS' `mdrun` simulation tool. As simulation system we use STMV input.
 
 We will start with a basic job submission script (batch script) and successively build on it to explore how to correctly request resources using the SLURM job scheduler and to finally arrive to have a script that correctly requests resources on LUMI-G nodes.
 
 :::info
-:bulb: The LUMI-G hardware partition consists of 2978 nodes with 4 AMD MI250x GPUs and a single 64 cores AMD EPYC "Trento" CPU. Each MI250x GPU is a multi-chip module with two GPU dies named by AMD Graphics Compute Die (GCD). For furtherdetails on the LUMI architecture, see [the LUMI documentation](https://docs.lumi-supercomputer.eu/hardware/lumig/) or [how to use GROMACS on LUMI](https://docs.csc.fi/apps/gromacs/).
+:bulb: The LUMI-G hardware partition consists of 2978 nodes with 4 AMD MI250X GPUs and a single 64 cores AMD EPYC "Trento" CPU. Each MI250X is a multi-chip module with two GPU dies named "AMD Graphics Compute Die" (GCD). For further details on the LUMI architecture, see [the LUMI documentation](https://docs.lumi-supercomputer.eu/hardware/lumig/) or [how to use GROMACS on LUMI](https://docs.csc.fi/apps/gromacs/).
 :::
 
 :::success
@@ -137,26 +130,31 @@ Now, we will launch a first test simulation on LUMI-G. Make sure you have copied
 #SBATCH --time=00:10:00                # maximum execution time of 10 minutes
 #SBATCH --nodes=1                      # we use 1 node
 #SBATCH --ntasks-per-node=1            # 1 MPI rank
-#SBATCH --cpus-per-task=1              # number cpus-per-task
+#SBATCH --cpus-per-task=1              # 1 CPU core
 
 module use /appl/local/csc/modulefiles
 module load gromacs/2023.3-gpu
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
-srun gmx_mpi mdrun -g ex1.1_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} -nsteps -1 -maxh 0.017 -resethway -notunepme
-
+srun gmx_mpi mdrun \
+    -g ex1.1_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
+    -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
 Note the four benchmarking flags used above (`-nsteps`, `-maxh`, `-resethway` and `-[no]tunepome`) [are described in the introduction](https://hackmd.io/qvLmXFLCQGScOHhdjS5uQw#The-mdrun-simulation-tool).
 We use time limited runs here by passing `-maxh 0.017` which sets the run time limit in hours (~one minute); we do that as the simulation throughput significantly changes and we want to avoid either very long wait time or unreliable benchmark measurements due to just a few seconds of runtime.
 
-==CB: Here I would add something like: "To submit the job, use the `sbatch` command and wait until it finishes (it should not take longer than 10 minutes!)."==
+Submit the job (use the `sbatch` command) and wait until it finishes.
 
 :::warning
 * Take a look at log file (.log) and find the hardware detection and performance table. What are the resources detected and used? 
 :::
 
 Now try to enable multithreading. To do that, we need to request multiple CPU cores. Edit the job script, change the number of CPU cores and submit a new job.
+
+:::info
+:bulb: `SBATCH` arguments provided in the job script header can also be passed on the command line (e.g. `sbatch --cpus-per-task N`) overriding the setting in the job script header. Doing so can allow varying submission parameters without having to edit the job script.
+:::
 
 ```bash=
 #!/bin/bash
@@ -173,8 +171,9 @@ module load gromacs/2023.3-gpu
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
-srun gmx_mpi mdrun -g ex1.1_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} -nsteps -1 -maxh 0.017 -resethway -notunepme
-
+srun gmx_mpi mdrun \
+    -g ex1.1_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
+    -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
 
 :::warning
@@ -185,10 +184,7 @@ LUMI-G has relatively few CPUs cores per GPU, so making the best use of these is
 
 ### Exercise 1.2: Launching a simple GROMACS GPU run
 
-==CB: I don't understand how it can be seen in the previous exercise that we need to request a GPU. We just want a GPU? AV I edit below based to CB comment AA/SP check that it is what you want==
-As note in the previous exercise, GPU are not detected in the log file, but a LUMI-G node has 8 graphical cards. Now we learn how to request GPUs. Use the job script below to submit a job using one GCD (in particular, this is usefull for jobs which do not use the full node).
-
-== AV to SP and AA do we use both GCD and GPU?== 
+Note in the log files of previous exercise that GPUs are **not** detected. Now we learn how to request GPUs. Use the job script below to submit a job using one GPU.
 
 ```bash=
 #!/bin/bash
@@ -199,59 +195,55 @@ As note in the previous exercise, GPU are not detected in the log file, but a LU
 #SBATCH --nodes=1                      # we run on 1 node
 #SBATCH --ntasks-per-node=1            # 1 MPI rank
 #SBATCH --cpus-per-task=7              # number cpus-per-task
-#SBATCH --gpus-per-task=1              # New line! Get 1 GPU device  
+#SBATCH --gpus-per-node=1              # New line! Get 1 GPU device  
 
 module use /appl/local/csc/modulefiles
 module load gromacs/2023.3-gpu
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
-srun gmx_mpi mdrun -g ex1.2_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID}
--nsteps -1 -maxh 0.017 -resethway -notunepme
-
+srun gmx_mpi mdrun \
+    -g ex1.2_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
+    -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
 
 :::warning
 * Look at the log file hardware detection and performance table: what are the resources detected and used?
-* Compera the log file of Ex 1.1 and 1.2. Has the performance changed?
+* Compare the log file of Ex 1.1 and 1.2. Has the performance changed?
 :::
 
 ### _Bonus_ Exercise 1.3: Explore the use of CPUs and OpenMP multi-threading
 
-==AA to SP/AA I am confuse, in the example script below you ask gpus, but you wrote that we do not use GPU.. I guess the script is wrong. Or?==
 
 In this exercise, we will use only the CPUs of the LUMI-G nodes to explore how the different computational tasks perform with OpenMP multi-threading. 
 
 ```bash=
 #!/bin/bash
-#SBATCH --time=00:10:00        # maximum execution time of 10 minutes
-#SBATCH --partition=dev-g
-#SBATCH --account=project_...  # Project for billing
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=7
-#SBATCH --gpus-per-task=1      # New line! Get a GPU
+#SBATCH --partition=small-g            # partition to use
+#SBATCH --account=project_465000934    # project for billing
+#SBATCH --reservation=gromacs_wednesday # reservation for 24 January 
+#SBATCH --time=00:10:00                # maximum execution time of 10 minutes
+#SBATCH --nodes=1                      # we run on 1 node
+#SBATCH --ntasks-per-node=1            # 1 MPI rank
+#SBATCH --cpus-per-task=...            # number cpus-per-task
 
 module use /appl/local/csc/modulefiles
 module load gromacs/2023.3-gpu
 
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
-srun gmx_mpi mdrun -nsteps -1 -maxh 0.017 -resethway -notunepme \
-    ex1.3_1x${SLURM_CPUS_PER_TASK}_jID${SLURM_JOB_ID}
+srun gmx_mpi mdrun \
+    -g ex1.3_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
+    -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
-==CB: Here, instructions come after the script. Previously, they came before. Maybe good to be consistent?==
 * Modify the script varying the number of CPU cores used (`--cpus-per-task`) and submit runs with each new configuration.
 * Look at the `mdrun` log file output (the files will be named `ex1.3_1xN_jIDXXXXXX.log`).
 
 :::warning
 * How does the absolute performance (ns/day) change when increasing the number of cores used?
-* How does the wall-time of various computations changes with the thread count (e.g. "Force", "PME mesh", "Update" tasks).
+* How does the wall-time of various computations change with the thread count (e.g. "Force", "PME mesh", "Update" tasks)?
 
 [//]: # (Comment: * _Bonus_: )
-:::
-
-:::info
-:bulb: `SBATCH` arguments provided in the job script header can also be passed on the command line (e.g. `sbatch --cpus-per-task N`) overriding the setting in the job script header. Doing so can allow varying submission parameters without having to edit the job script.
 :::
 
 :::spoiler Help with the solution
@@ -274,9 +266,7 @@ The GROMACS MD engine uses heterogeneous parallelization which can flexibly util
 Further details can be found in the [GROMACS users guide](https://manual.gromacs.org/current/user-guide/mdrun-performance.html#running-mdrun-with-gpus) and [DOI:10.1063/5.0018516](https://aip.scitation.org/doi/full/10.1063/5.0018516).
 
 
-In the following exercises, we will learn how moving tasks between the CPU and GPU impacts performance. As simulation system we use the satellite tobacco mosaic virus, STMV. You can take topol.tpr file from the exercise-1 serie (or copy it from the folder `/projappl/project_465000934/stmv` on LUMI) 
-==AV to check that the directory path is correct==
-
+In the following exercises, we will learn how moving tasks between the CPU and GPU impacts performance. As simulation system we use the STMV input.
 
 We will be using LUMI-G GPU nodes for submitting single-GPU device jobs (hence using one of the eight in the full compute node); for further details on the architecture and usage see the [GPU nodes - LUMI-G](https://docs.lumi-supercomputer.eu/hardware/lumig/).
 
@@ -299,7 +289,7 @@ We use one GPU with CPU cores (an eighth of the node) in a simulation and assess
 #SBATCH --reservation=gromacs_thursday # reservation for 25 January
 #SBATCH --time=00:10:00                # maximum execution time of 10 minutes
 #SBATCH --nodes=1                      # we run on 1 node
-#SBATCH --gpus-per-task=1              # we use 1 GPU device 
+#SBATCH --gpus-per-node=1              # we use 1 GPU device 
 #SBATCH --ntasks-per-node=1            # 1 MPI rank
 #SBATCH --cpus-per-task=7              # number cpus-per-task
 
@@ -308,20 +298,21 @@ module load gromacs/2023.3-gpu
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
-srun gmx_mpi mdrun -nb gpu -pme gpu -bonded gpu -update cpu \
-   -g ex2.1_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} -nsteps -1 -maxh 0.017 -resethway -notunepme
-
+srun gmx_mpi mdrun \
+    -nb gpu -pme gpu -bonded gpu -update cpu \
+    -g ex2.1_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
+    -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
-* Next submit jobs by incrementally offloading various force tasks ( non-bonded `-nb`, PME `-pme`, bonded `-bonded`) to the GPU.
+* Next submit jobs by incrementally offloading various force tasks (non-bonded `-nb`, PME `-pme`, bonded `-bonded`) to the GPU.
 
 :::warning 
 * How does the performance (ns/day) change with offloading more tasks?
 * Look at the performance table in the log and observe how the fraction wall-time spent in the tasks left on the CPU change. 
-
-**Note** that the log file performance report will only contain timings of tasks executed on the CPU, not those offloaded to the GPU, as well as timings of the CPU time spent launching GPU work as well as waiting for GPU results.
 :::
+
 :::info
-:bulb: The mdrun option `-maxh 0.017` sets the run time limit in hours (~one minute); we do that as the simulation throughput significantly changes and we want to avoid either very long wait time or unreliable benchmark measurements due to just a few seconds of runtime.
+:bulb:
+**Note** that the log file performance report will only contain timings of tasks executed on the CPU, not those offloaded to the GPU, as well as timings of the CPU time spent launching GPU work as well as waiting for GPU results.
 :::
 
 ### Exercise 2.2: GPU-resident mode
@@ -335,7 +326,7 @@ Continuing from the previous exercise, we will now explore using the GPU-residen
 #SBATCH --reservation=gromacs_thursday # reservation for 25 January
 #SBATCH --time=00:10:00                # maximum execution time of 10 minutes
 #SBATCH --nodes=1                      # we run on 1 node
-#SBATCH --gpus-per-task=1              # we use 1 GPU device 
+#SBATCH --gpus-per-node=1              # we use 1 GPU device 
 #SBATCH --ntasks-per-node=1            # 1 MPI rank
 #SBATCH --cpus-per-task=7              # number cpus-per-task
 
@@ -344,9 +335,10 @@ module load gromacs/2023.3-gpu
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
-srun gmx_mpi mdrun -nb gpu -pme gpu -bonded gpu -update gpu \
-     -g ex2.2_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} -nsteps -1 -maxh 0.017 -resethway -notunepme
-     
+srun gmx_mpi mdrun \
+    -nb gpu -pme gpu -bonded gpu -update gpu \
+    -g ex2.2_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
+    -nsteps -1 -maxh 0.017 -resethway -notunepme 
 ```
 
 * Submit a fully offloaded GPU-resident job using the `-update gpu` option (as above).
@@ -358,9 +350,8 @@ srun gmx_mpi mdrun -nb gpu -pme gpu -bonded gpu -update gpu \
 * How does the GPU-resident mode perform compared to the best performing force-offload run from ex 2.1?
 * How did the performance change when force tasks were moved back to the CPU?
 * _Bonus_: Enable (PME) task load balancing by replacing `-notunepme` with `-tunepme`. Assign the PME task to the CPU and GPU and observe how the performance changes compared to the earlier similar run without load balancing.
+* _Bonus_: The frequency of neighbor search (`nstlist`) is a free parameter and can impact performance. Observe the default in the log files, try other values (e.g. double and triple) and observe how the performance changes.
 :::
-
-==TODO: add -nstlist tuning exercise / question== 
 
 :::spoiler help with the results
 Sample log files for the exercise session.: 
@@ -375,36 +366,21 @@ Sample log files for the exercise session.:
 :dart: **Learning goals**
 * Understand how task- and domain decomposition is used in the `mdrun` simulation engine.
 * Explore the multi-GPU strong scaling of GROMACS simulations and the effect of using different decomposition and communication schemes.
-
 :::
 
-In these exercises, we will explore the use of multiple GPUs (on one or several GPU-enabled nodes) to improve the simulation performance. As simulation system we use the satellite tobacco mosaic virus, STMV. You can take topol.tpr file from the previuos exercise serie (or copy it from the folder `/projappl/project_465000934/stmv` on LUMI) 
-==AV to check that the directory path is correct==
+In these exercises, we will explore the use of multiple GPUs to improve the simulation performance. As simulation system we use the satellite tobacco mosaic virus, STMV.
 
 ### Exercise 3.1: Separate PME rank
 
-In the previuos exercise serie, we have learnt how to offload some _tasks_ from CPU to GPU: short-range nonbonded, PME and bonded forces, update and constraints. When scaling across **two** GPU devices, the same approach can be applied. 
-
-==CB: Nice with these explanations!==
-:::info
-Recall from the lecture the notion of _MPI rank_: MPI ranks coordinate their work by exchanging data over a special protocol and, unlike OpenMP threads, can run on different _nodes_ in the cluster. Each MPI rank can only use one GPU, but different MPI ranks can use different GPUs.
-:::
-
-With two MPI ranks, `mdrun` can do non-bonded, bonded, and integration tasks on the first rank and PME on the second rank. This is a basic version of run mode called _separate PME rank_. Furthermore, each task can be run either on CPU or GPU; when running on CPU, the work can be distributed across multiple OpenMP threads within a rank.
-==CB: "...when running on CPU, the work can be distributed across multiple OpenMP threads within a rank." What about the GPU?==
+In the previous exercise series, we have learnt how to offload some _tasks_ from CPU to GPU: short-range nonbonded, PME and bonded forces, update and constraints. When scaling across **two** GPU devices, the same approach can be applied. 
 
 :::info
-Recall from the lecture on LUMI architecture that there is an intricate interconnection between CPUs and GPUs. To make sure the code runs optimally, always use ==TODO== wrapper script, which pins CPU and GPU tasks to the devices in the optimal fashion for LUMI.
+_MPI ranks_ coordinate their work by exchanging data over a special protocol and, unlike OpenMP threads, can run on different _nodes_ in the cluster. Each MPI rank can only use one GPU, but different MPI ranks can use different GPUs (or the same one).
 :::
+
+With two MPI ranks, `mdrun` can do non-bonded, bonded, and integration tasks on the first rank and PME on the second rank. This is a basic version of run mode called _separate PME rank_. Furthermore, each task can be run either on CPU or GPU. When running on CPU, the work can be distributed across multiple OpenMP threads within a rank; when running on GPU, the task is automatically mapped to the GPU's compute resources.
 
 Try running on two GPUs using two ranks, one particle-particle (PP) and one PME:
-
-==AV to AA Note that the batch scripts used for 3.1 and 3.2,  do not include `--exclusive`.  I have copied the window in 3.3 where we have --exclusive. ==
-
-:::warning 
-⚠️ ==TODO== The script below uses `--exclusive` flag, reserving the whole node, yet uses only two GPUs out of eight. This makes performance measurements from short runs more predictable, but should not be used for long runs as it wastes resources. 
-:::
-
 
 ```bash=
 #!/bin/bash
@@ -413,8 +389,8 @@ Try running on two GPUs using two ranks, one particle-particle (PP) and one PME:
 #SBATCH --reservation=gromacs_thursday # reservation for 25 January
 #SBATCH --time=00:10:00                # maximum execution time of 10 minutes
 #SBATCH --nodes=1                      # we run on 1 node
-#SBATCH --gpus-per-task=..             # fill in number of  GPU devices 
-#SBATCH --ntasks-per-node=...          # fill in number of MPI rank
+#SBATCH --gpus-per-node=..             # fill in number of  GPU devices 
+#SBATCH --ntasks-per-node=...          # fill in number of MPI ranks
 #SBATCH --cpus-per-task=7              # number cpus-per-task
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
@@ -426,13 +402,12 @@ srun gmx_mpi mdrun -npme 1  \
 
 ```
 
-==TODO:Check that non-full-node runs behave consistently==
 
-* Try to changing which tasks are offloaded to GPUs and CPUs by varying `-bonded` and `-update` flags (keeping `-nb gpu -pme gpu`). 
+* Try changing which tasks are offloaded to GPUs and CPUs by varying `-bonded` and `-update` flags (keeping `-nb gpu -pme gpu`). 
 
 :::warning 
-* Look at the absolute performance in the log files.
-* Compare the log files when different tasks are offloaded to GPUs and CPUs. Is the GPU-resident or force-offload mode more efficient?
+* Look at the absolute performance in the log files. Note that the communication overhead when using two GPUs outweighs the gains.
+* _Advanced_: Compare log files for GPU-resident run with Ex. 2.2. How many times is "Wait GPU state copy" called in each case (compared to the total number of steps)?
 :::
 
 ### Exercise 3.2: Separate PME rank with direct GPU communication.
@@ -446,28 +421,29 @@ export MPICH_GPU_SUPPORT_ENABLED=1
 export GMX_ENABLE_DIRECT_GPU_COMM=1
 export GMX_FORCE_GPU_AWARE_MPI=1
 ```
+
 * Add these three variables to the script from Exercise 3.1 (before calling `srun`) and repeat the runs of the previous exercise, but now with GPU-direct communication enabled. 
 
 :::warning 
-* Look at how the absolute performance change in the log files
-* Compare the performance counters in log files in this and previous exercise. What do you observed? ==TODO==: Add hints.
-* _Bonus:_ Is the GPU-resident or force-offload mode more efficient now?
+* Look at how the absolute performance change in the log files.
+* _Advanced_: Compare the performance counters in log files in this and previous exercise. What do you observe? (Hint: check "Send X to PME" and "Wait GPU state copy").
 :::
 
 
 ### Exercise 3.3: Domain-decomposition with a separate PME rank
 
-
 Distributing tasks between GPUs only allows limited parallelism. If we wish to scale to more than two GPUs, _domain decomposition_ should be employed. 
 
-==CB: I found some sentences below a bit unclear. Suggestion for reformulation: "Most interactions in molecular dynamics are short-range which generally don't interfere with the domain decomposition approach. However, long-range electrostatic interactions are less amenable to decomposition and therefore require some special attention."==
-
 :::info
-Recall from the lecture that the domain decomposition allows _spatially_ decomposing simulation data into _domains_. Most interactions in molecular dynamics are short-range except long-range electrostatics. This is less amenable to decomposition. Typically, when scaling over _N_ ranks (1 GPU per rank, _N_ > 2), we use one rank to compute long-range electrostatics (PME) for the whole system, and use domain decomposition to distribute the other tasks between the remaining _N_-1 ranks.
+Recall from the lecture that the domain decomposition allows _spatially_ decomposing simulation data into _domains_. Most interactions in molecular dynamics are short-range, and thus suitable for the domain decomposition approach. However, long-range electrostatic interactions are less amenable to decomposition and therefore require some special handling. Typically, when scaling over _N_ ranks (1 GPU per rank, _N_ > 2), we use one rank to compute long-range electrostatics (PME) for the whole system and use domain decomposition to distribute the other tasks (short-range non-bonded, bonded, integration) between the remaining _N_-1 ranks.
 :::
 
-Now we try running on 4, 6, 8 ranks (including one separate PME rank) by changing the values in the script below. To  dedicate one rank for PME we use the option `-npme 1`.
-==AV to AA: If you want gpus-per-node=ntask-per-node, good specify here again (e.i something like that "ensure that you ask a number of GPUs equal to MPI ranks"== 
+Now we try running on 4, 6, 8 ranks (including one separate PME rank) by changing the values in the script below (ensure that the values of `--gpus-per-node` and `--ntasks-per-node` are equal). To dedicate one rank for PME we use the option `-npme 1`.
+
+
+:::info
+Recall from the lecture on LUMI architecture that there is an intricate interconnection between CPUs and GPUs. To make sure the code runs optimally, always use `lumi-affinity.sh` script and `srun --cpu-bind=${CPU_BIND} ./select_gpu` invocation to optimally pin CPU and GPU tasks to the devices.
+:::
 
 
 ```bash=
@@ -483,7 +459,7 @@ Now we try running on 4, 6, 8 ranks (including one separate PME rank) by changin
 
 module use /appl/local/csc/modulefiles
 module load gromacs/2023.3-gpu
-source ${GMXBIN}/lumi-affinity.sh
+source ${GMXBIN}/lumi-affinity.sh      # new! script to configure LUMI GPU-GPU affinity
 
 export OMP_NUM_THREADS=7
 
@@ -496,37 +472,17 @@ srun --cpu-bind=${CPU_BIND} ./select_gpu \
                    -g ex3.3_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
                    -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
-==AV to AA: I suggest to add this sentence here "The script below uses `--exclusive` flag, to reserve the whole node. This makes performance measurements from short runs more predictable, but should not be used for long runs as it wastes resources."== 
 
-==AV to AA: to be on the save side, please check. Below your old example script. Above example script from CSC. Please delete the script below if everything is cover by the above one.==
-
-```bash=
-#!/bin/bash     NOT LUMI SCRIPT
-#
-#SBATCH --time=00:10:00
-#SBATCH --nodes=1
-#SBATCH --ntasks=...      # Number of ranks, max. 8 per node
-#SBATCH --cpus-per-task=7
-#SBATCH --gres=gpu:...    # Should match the number of tasks
-
-module load TODO
-export OMP_NUM_THREADS=5
-export MPICH_GPU_SUPPORT_ENABLED=1
-export GMX_ENABLE_DIRECT_GPU_COMM=1
-export GMX_FORCE_GPU_AWARE_MPI=1
-
-srun launcher_script_todo.sh gmx_mpi mdrun \
-    -npme 1 \ # We always dedicate one rank for PME
-    -nb gpu -pme gpu -bonded cpu -update cpu \
-    -g ex3.3_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
-    -nsteps -1 -maxh 0.017 -resethway -notunepme
-```
+:::warning 
+⚠️ The script above uses `--exclusive` flag, reserving the whole node. This is necessary to be able to set CPU and GPU affinities and it makes performance measurements from short runs more predictable. However, exclusive reservations should not be used for long runs unless you are using all eight GPUs.
+:::
 
 
 :::warning 
-* Look at the absolute performance in the log file.
+* Look at the absolute performance in the log files.
 * How does absolute performance scale with increasing number of GPUs?
-* Bonus: Look at the values of nstlist in the log files. What do you observe?  
+* _Bonus_: In Exercise 3.2, the performance gains were limited because there is not enough PME work to offset the overhead of extra communication. Try running on two GPUs (`--gpus-per-node=2`) with three ranks (`--ntasks-per-node=3`) so that one GPU does PP work, and the other does PP+PME. How does the performance compare to Exercise 3.2?
+* _Bonus_: The frequency of domain decomposition and neighbor search (`nstlist`) is a free parameter and can impact performance. Observe the default in the log files; try other values (e.g. double and triple) and observe how the performance changes.
 :::
 
 :::spoiler Help with the solution
@@ -536,51 +492,9 @@ Sample log files for the exercise session.:
 * [ex 3.3](https://github.com/Lumi-supercomputer/gromacs-on-lumi-workshop/tree/main/Exercise-3.3/STMV)
 :::
 
-### Exercise 3.4: Domain-decomposition with a PME decomposition (advanced)
-
-==TODO== Decide whether a separate module is needed and whether scaling works at all
-
-In the previous exercises, we explored scaling of GROMACS simulation across up to 8 GPUs using task-decomposition to assign long-range electrostatic work to one GPU, and domain-decomposition to distribute the short-range work between the remaining GPUs. Past a certain number of ranks, PME work running on a single device might become the bottleneck. In this case, _PME decomposition_ must be used. To use it, you can either:
-- set `-npme` to a value greater than 1, in which case the specified number of ranks will be dedicated to PME work, and the rest to the short-range work, or
-- set `-npme 0`, in which case all ranks will do short-range and long-range work.
-
-==CB:"all ranks will do **both(?)** short-range and long-range work"==
-
-Try running the simulation on two nodes (16 GPUs), with 1, 2, and 4 dedicated PME ranks, as well as with PME decomposition over all ranks (`-npme 0`):
-
-==AV to AA we do not have example script, neither test in  CSC repo. Shall we tell the attendees to modify one of the script above (if we are sure that it works on 2 nodes).==
-
-```bash=
-#!/bin/bash
-#SBATCH --time=00:10:00
-#SBATCH --nodes=2
-#SBATCH --ntasks=16
-#SBATCH --cpus-per-task=7
-#SBATCH --gres=gpu:16
-
-module load TODO
-export OMP_NUM_THREADS=5
-export MPICH_GPU_SUPPORT_ENABLED=1
-export GMX_ENABLE_DIRECT_GPU_COMM=1
-export GMX_FORCE_GPU_AWARE_MPI=1
-export GMX_GPU_PME_DECOMPOSITION=1 # Needed to enable PME decomposition
-
-NPME=... # Set the number of dedicated PME ranks (or 0 to run PME on all PP ranks)
-
-srun launcher_script_todo.sh gmx_mpi mdrun \
-	-npme ${NPME} \ # Decompose PME over two ranks
-	-nb gpu -pme gpu -bonded gpu -update gpu \
-	-g ex3.4_${SLURM_NTASKS}x${OMP_NUM_THREADS}_${NPME}PME_jID${SLURM_JOB_ID} -nsteps -1 -maxh 0.017 -resethway -notunepme
-   
-```
-
-:::warning
-* Look at the absolute performance in the log file
-* How does the absolute performance change when the number of PME ranks is changed? What is the optimal ration of PP to PME ranks for this system?
-:::
 
 ## 4. Ensemble parallelization across multiple GPUs
-==CB: This section seems very clear to me!==
+
 :::success
 :dart: **Learning goals**
 * Understand how to set up and run ensemble simulations with `-multidir`.
@@ -595,15 +509,14 @@ In this exercise we will learn how to run ensemble simulations using `mdrun` _mu
 
 The example system uses a strongly coupled ensemble setup based on multi-walker AWH. The AWH setup is flexible in terms of ensemble size and can employ up to 32 members.
 
-To run multi-simulations the mdrun option `-multidir` can be used. Note that the`-multidir` feature requires one input directory per ensemble member containing simulation input files (e.i tpr files) and this is where outputs will be written. You find the  directory structure in the [input tarball](https://a3s.fi/gmx-lumi/workshop-input-files.tar.gz) or in the folder /projappl/project_465000934/aquaporin/ensemble_inputs on LUMI.
-==AV to check that the directory path is correct==
+To run multi-simulations the mdrun option `-multidir` can be used. Note that the`-multidir` feature requires one input directory per ensemble member which should contain simulation input (tpr) file and where outputs will be written. The directory structure for `-multidir` runs is provided in the input tarball.
 
 
 ### Exercise 4.1: Ensemble runs with `-multidir`
 
-When the simulation system is relatively small, it may not be able to fully saturate modern HPC GPUs. In such cases, we can achieve better hardware utilization by assigning multiple ensemble members to a GPU. By doing so we provide more (indenpendent) work to each GPU, which can significantly improve _aggregate simulation throughput_ and can allow making _more efficient use of GPU hardware_.
+When the simulation system is relatively small, it may not be able to fully saturate modern HPC GPUs. In such cases, we can achieve better hardware utilization by assigning multiple ensemble members to a GPU. By doing so we provide more (independent) work to each GPU, which can significantly improve _aggregate simulation throughput_ and allows making _more efficient use of GPU hardware_.
 
-To explore this, we will use a fixed amount of hardware resources and vary the ensemble size. We will start with the GPU-resident setup from Exercise 2.2 and run multi-GPU ensemble runs on all eight GPUs of a single LUMI-G node.
+To explore this, we will use a fixed amount of hardware resources and vary the ensemble size. Starting with the GPU-resident setup from Exercise 2.2 we will run multi-GPU ensemble runs on all eight GPUs of a single LUMI-G node.
 ```bash=
 #!/bin/bash
 #SBATCH --partition=small-g            # partition to use
@@ -612,41 +525,23 @@ To explore this, we will use a fixed amount of hardware resources and vary the e
 #SBATCH --exclusive                    # new! to reserve the whole node
 #SBATCH --time=00:10:00                # maximum execution time of 10 minutes
 #SBATCH --nodes=1                      # we run on 1 node
-#SBATCH --gpus-per-node=..             # fill in the number of GPU devices per node 
-#SBATCH --ntasks-per-node=..           # fill in the number of  MPI rank
+#SBATCH --gpus-per-node=8              # the number of GPU devices per node 
+#SBATCH --ntasks-per-node=..           # fill in the number of MPI ranks
 
 module use /appl/local/csc/modulefiles
 module load gromacs/2023.3-gpu
 source ${GMXBIN}/lumi-affinity.sh   # 
 
-export OMP_NUM_THREADS=             # fill in the value          
-num_multi=....                      # change ensemble dimension 
-#start with 8-way ensemble - update values above together with ?? in the command line below
+export OMP_NUM_THREADS=...          # fill in the number of threads (7/(ntasks-per-node/8))     
+num_multi=...                       # change ensemble size 
 
-srun --cpu-bind=${CPU_BIND} ./select_gpu gmx_mpi mdrun -multidir sim_{01..??} \
-                   -nb gpu -pme gpu -bonded gpu -update gpu \
-                   -g ex4.1_${SLURM_NNODES}N_multi${num_multi}_jID${SLURM_JOB_ID} \
-                   -nsteps -1 -maxh 0.017 -resethway -notunepme
+srun --cpu-bind=${CPU_BIND} ./select_gpu \
+    gmx_mpi mdrun -multidir sim_{01..??} \
+    -nb gpu -pme gpu -bonded gpu -update gpu \
+    -g ex4.1_${SLURM_NNODES}N_multi${num_multi}_jID${SLURM_JOB_ID} \
+    -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
-==AV to SP: please check that the above (CSC) is what you want. Below (your example). If yes delete the script below. I guess you want that the change also N of THREADS, good to give some hint==  
-```bash=
-#SBATCH --time=00:10:00
-#SBATCH --nodes=1            
-#SBATCH --ntasks=...         # Change this 
-#SBATCH --cpus-per-task=...  # and this value as well, together with the "..." below
 
-# module load ... 
-export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
-
-num_multi=16
-
-mpirun -np $num_multi gmx_mpi mdrun \
-   -multidir repl_{01..16} \
-   -nb gpu -pme gpu -bonded gpu -update gpu \
-   -g ex4.1_${SLURM_NNODES}N_multi${num_multi}_jID${SLURM_JOB_ID} \ 
-   -nsteps -1 -maxh 0.017 -resethway -notunepme                    
-
-```
 * As a baseline, launch one simulation per GPU, hence an 8-way ensemble on one LUMI-G node. 
 * Next, submit jobs with multiple (2,3 and 4) simulations per GPU on one LUMI-G node.
 
@@ -658,11 +553,11 @@ mpirun -np $num_multi gmx_mpi mdrun \
 
 
 
-### Exercise 4.2: Trading efficiency for increasing simulation throughput 
+### Exercise 4.2: Trading efficiency for higher simulation throughput 
 
 In some cases, we want to increase the (non-aggregate) performance of the ensemble, e.g. if we need to sample longer. In such cases, we might have to trade performance for efficiency. 
 
-In this exercise, we will combine what we have learnt in the exercise serie 3 and in ex. 4.1. We will scale each ensemble member across multiple GPUs to improve simulation performance. To do that, we will use a fixed 16-way ensemble and run it varying the amount of compute resources used.
+In this exercise, we will combine what we have learnt in the exercises 3.x and 4.1. We will assign an increasing amount of GPU resources to each ensemble member to improve simulation performance. To do that, we will use a fixed 16-way ensemble and run it varying the amount of compute resources.
 
 ```bash=
 #!/bin/bash
@@ -672,38 +567,28 @@ In this exercise, we will combine what we have learnt in the exercise serie 3 an
 #SBATCH --exclusive                    # new! to reserve the whole node
 #SBATCH --time=00:10:00                # maximum execution time of 10 minutes
 #SBATCH --nodes=...                    # fill in the number of node 
-#SBATCH --gpus-per-node=..             # fill in the number of GPU devices per node 
-#SBATCH --ntasks-per-node=..           # fill in the number of  MPI rank
+#SBATCH --gpus-per-node=8              # the number of GPU devices per node 
+#SBATCH --ntasks-per-node=..           # fill in the number of MPI ranks
 
 module use /appl/local/csc/modulefiles
 module load gromacs/2023.3-gpu
-source ${GMXBIN}/lumi-affinity.sh     # 
+source ${GMXBIN}/lumi-affinity.sh
 
-export OMP_NUM_THREADS=               # fill in the number of omp threads
+export OMP_NUM_THREADS=...           # fill in the number of OpenMP threads
 
 export MPICH_GPU_SUPPORT_ENABLED=1
 export GMX_ENABLE_DIRECT_GPU_COMM=1
 export GMX_FORCE_GPU_AWARE_MPI=1
 
-num_multi=16                         # ensemble dimension 
+num_multi=16                         # ensemble size 
 
 srun --cpu-bind=${CPU_BIND} ./select_gpu \
-     gmx_mpi mdrun -multidir sim_{01..16} \
-                   -npme 1 \
-                   -nb gpu -pme gpu -bonded gpu -update gpu \
-                   -g ex4.2_${SLURM_NNODES}N_multi${num_multi}_jID${SLURM_JOB_ID} \
-                   -nsteps -1 -maxh 0.017 -resethway -notunepme
+    gmx_mpi mdrun -multidir sim_{01..16} \
+    -npme ... \     # set this to 0 or 1
+    -nb gpu -pme gpu -bonded gpu -update gpu \
+    -g ex4.2_${SLURM_NNODES}N_multi${num_multi}_jID${SLURM_JOB_ID} \
+    -nsteps -1 -maxh 0.017 -resethway -notunepme
 
-```
-==AV to SP in the original script in the command line was -npme ... (see below) while in the LUMI script (above) I set -npme 1 to avoid to many choice, please change back if you do not agree==
-```bash=
-#Command line in Szilard script
-mpirun gmx_mpi mdrun \
-   -multidir ${num_multi} repl_{01..16} \
-   -npme ... \
-   -nb gpu -pme gpu -bonded gpu -update gpu \
-   -g ex4.2_${SLURM_NNODES}N_multi${num_multi}_jID${SLURM_JOB_ID} \ 
-   -nsteps -1 -maxh 0.017 -resethway -notunepme                    
 ```
 
 * As a baseline, we will use the single-node case, that is 16-way ensemble with 2 simulations per GPU (or a half-GPU per ensemble member) on a single LUMI-G node. Run this setup or you can reuse this result from the previous exercise.
@@ -713,7 +598,7 @@ mpirun gmx_mpi mdrun \
 :::warning 
 * How does the performance (ns/day) of _each ensemble member_ simulation change as you increase the number of nodes/GPUs used?
 * How does the aggregate performance per node change as you increase the number of nodes/GPUs used?
-* _Bonus_: log in to the compute nodes and observe the GPU utilization using `rocm-smi` during the 1- and 4-node ensemble runs.
+* _Bonus_: observe the GPU utilization using `rocm-smi` during the 1- and 4-node ensemble runs. On LUMI you can do so by launching `watch rocm-smi` in a job that "overlaps" with an existing job running [as described in the LUMI docs](https://docs.lumi-supercomputer.eu/runjobs/scheduled-jobs/interactive/#using-srun-to-check-running-jobs).
 :::
 
 
@@ -725,7 +610,8 @@ Starting with the setup from the previous exercise, explore mapping some lighter
 
 * As a baseline, we will use the fully GPU-offloaded runs from the previous exercise.
 * Submit jobs with `-bonded cpu` and/or `-update cpu` 
-* Bonus: repeat the same for a larger simulation system, like STMV . 
+* _Bonus_: repeat the same for a larger simulation system, like STMV.
+ 
 :::warning 
 * Compare the log file when different tasks are GPU-offloaded. How do _per-simulation_ and _per-node_ aggregate performance change? 
 * Bonus: Look at the STMV log files. Do a STMV and aquaporin show the same behavior?
@@ -733,9 +619,21 @@ Starting with the setup from the previous exercise, explore mapping some lighter
 
 [//]: <> (The following does not make sense on LUMI, so it's skipped)
 [//]: <> (* Extra bonus: explore using multiple GPU runs mapped to the same set of GPUs e.g. 8-way ensemble per node, 2 GPUs/member, 2 members sharing a pair of GPUs. Try swapping around the order of PP and PME ranks to balance load on the shared GPUs.)
+
+:::spoiler help with the results
+Sample log files for the exercise session.: 
+* [ex 4.1](https://github.com/Lumi-supercomputer/gromacs-on-lumi-workshop/tree/main/Exercise-4.1)
+* [ex 4.2](https://github.com/Lumi-supercomputer/gromacs-on-lumi-workshop/tree/main/Exercise-4.2)
+:::
+
+
+
+---
+
 :::info
 **License**
-This material is shared under CC BY-SA 4.0 license. 
+This material is shared under CC BY-SA 4.0 license.
+
 ![CC BY-SA](https://hackmd.io/_uploads/SJvv38tuT.png "title" =240x84)
 
 
