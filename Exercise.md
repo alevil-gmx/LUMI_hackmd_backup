@@ -4,7 +4,7 @@
 (adapted from [doi:10.6084/m9.figshare.22303477](https://doi.org/10.6084/m9.figshare.22303477))
 
 ## Introduction
-[\\]: # (CB:Write an introductiory paragraph about the aim of the tutorial and some information about LUMI?)
+[\\]: # (CB Write an introductiory paragraph about the aim of the tutorial and some information about LUMI?)
 
 :::success 
 :dart: **Learning goals**
@@ -18,7 +18,7 @@ Software: GROMACS 2023
 [//]: # (### Performance in MD)
 [//]: # (Molecular dynamics simulations do the same calculation repeatedly, typically for a large number of time-steps. )
 
-### The GROMACS simulation engine 
+### The GROMACS simulation engine
 
 [GROMACS](https://www.gromacs.org) is a molecular simulation package which comes with a molecular dynamics simulation engine (`mdrun`), a set of analysis tools, and the gmxlib Python API. 
 
@@ -93,9 +93,9 @@ The simulation input files (including tpr) can be obtained from:
 
 * [Aquaporin](https://a3s.fi/gmx-lumi/aqp-240122.tar.gz)
 * [STMV](https://a3s.fi/gmx-lumi/stmv-240122.tar.gz)
-* or in the folder `/projappl/project_465000934` on LUMI
+* or from the folder `/projappl/project_465000934` on LUMI
 
-In exercises 1-3. start with the STMV input, while for exercise 4 Aquaporin. If time allows, feel free to experiment with the other input too.
+In exercises 1-3, start with the STMV input, while for exercise 4 Aquaporin. If time allows, feel free to experiment with the other input too.
 
 ## 1. Running your first jobs on LUMI-G
 
@@ -120,7 +120,7 @@ We will start with a basic job submission script (batch script) and successively
 :::
 
 ### Exercise 1.1: Launching a first GROMACS simulation on LUMI-G
-Now, we will launch a first test simulation on LUMI-G. Make sure you have copied the necessary topol.tpr file into a working directory of your choice (this is also where your output files will end up, so it's good to keep it organized!), and then create a batch file (with suffix .sh) with the following content:
+Now, we will launch a first test simulation on LUMI-G. Make sure you have copied the necessary topol.tpr file into a working directory of your choice under `/scratch/project_465000934` (this is also where your output files will end up, so it's good to keep it organized!), and then create a batch file (with suffix .sh) with the following content:
 
 ```bash=
 #!/bin/bash
@@ -214,8 +214,7 @@ srun gmx_mpi mdrun \
 
 ### _Bonus_ Exercise 1.3: Explore the use of CPUs and OpenMP multi-threading
 
-
-In this exercise, we will use only the CPUs of the LUMI-G nodes to explore how the different computational tasks perform with OpenMP multi-threading. 
+In this exercise, we will use only the CPUs of the LUMI-G nodes to explore how the different computational tasks perform with OpenMP multi-threading. Use the job script below to submit a job using only CPUs. Note that you have to fill in a value for `--cpu-per-task`. 
 
 ```bash=
 #!/bin/bash
@@ -236,10 +235,10 @@ srun gmx_mpi mdrun \
     -g ex1.3_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
     -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
-* Modify the script varying the number of CPU cores used (`--cpus-per-task`) and submit runs with each new configuration.
-* Look at the `mdrun` log file output (the files will be named `ex1.3_1xN_jIDXXXXXX.log`).
+* Modify the script varying the number of CPU cores used (`--cpus-per-task`) and submit runs with each new setting.
 
 :::warning
+* Look at the `mdrun` log file output (the files will be named `ex1.3_1xN_jIDXXXXXX.log`).
 * How does the absolute performance (ns/day) change when increasing the number of cores used?
 * How does the wall-time of various computations change with the thread count (e.g. "Force", "PME mesh", "Update" tasks)?
 
@@ -250,6 +249,7 @@ srun gmx_mpi mdrun \
 Sample log files for the exercise session.: 
 * [ex 1.1](https://github.com/Lumi-supercomputer/gromacs-on-lumi-workshop/tree/main/Exercise-1.1/STMV)
 * [ex 1.2](https://github.com/Lumi-supercomputer/gromacs-on-lumi-workshop/tree/main/Exercise-1.2/STMV)
+* [ex 1.3](https://github.com/Lumi-supercomputer/gromacs-on-lumi-workshop/tree/main/Exercise-1.3/STMV)
 :::
 
 ## 2. GPU accelerated simulations
@@ -299,7 +299,7 @@ module load gromacs/2023.3-gpu
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
 
 srun gmx_mpi mdrun \
-    -nb gpu -pme gpu -bonded gpu -update cpu \
+    -nb cpu -pme cpu -bonded cpu -update cpu \
     -g ex2.1_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
     -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
@@ -472,11 +472,8 @@ srun --cpu-bind=${CPU_BIND} ./select_gpu \
                    -g ex3.3_${SLURM_NTASKS}x${OMP_NUM_THREADS}_jID${SLURM_JOB_ID} \
                    -nsteps -1 -maxh 0.017 -resethway -notunepme
 ```
-
-:::warning 
+[//]: # (AV: I remove the yellow window since I found confusing here. Below we use it to tell what to do)
 ⚠️ The script above uses `--exclusive` flag, reserving the whole node. This is necessary to be able to set CPU and GPU affinities and it makes performance measurements from short runs more predictable. However, exclusive reservations should not be used for long runs unless you are using all eight GPUs.
-:::
-
 
 :::warning 
 * Look at the absolute performance in the log files.
