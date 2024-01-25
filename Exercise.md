@@ -532,6 +532,7 @@ source ${GMXBIN}/lumi-affinity.sh   #
 export OMP_NUM_THREADS=...          # fill in the number of threads (7/(ntasks-per-node/8))     
 num_multi=...                       # change ensemble size 
 
+# Change "??" in -multidir flag below to the ensemble size
 srun --cpu-bind=${CPU_BIND} ./select_gpu \
     gmx_mpi mdrun -multidir sim_{01..??} \
     -nb gpu -pme gpu -bonded gpu -update gpu \
@@ -546,6 +547,9 @@ srun --cpu-bind=${CPU_BIND} ./select_gpu \
 * How does the performance (ns/day) of _each ensemble member_ simulation change as you increase the number of simulations per GPU?
 * How does the aggregate performance per node change as you increase the number of simulations per GPU?
 * _Bonus_: log in to the compute node and observe the GPU utilization (using the `rocm-smi` tool) during the ensemble runs with lowest/highest aggregate performance.
+    * Try: `srun --interactive --pty --jobid=<jobid> $SHELL`, and once on the compute node, `rocm-smi -u`
+    * Alternatively, run `rocm-smi` directly: `srun --interactive --pty --jobid=<jobid> rocm-smi -u`
+    * replace `<jobid>` with the actual Slurm job ID of your job
 :::
 
 
@@ -579,9 +583,10 @@ export GMX_FORCE_GPU_AWARE_MPI=1
 
 num_multi=16                         # ensemble size 
 
+# set -npme to 0 or 1
 srun --cpu-bind=${CPU_BIND} ./select_gpu \
     gmx_mpi mdrun -multidir sim_{01..16} \
-    -npme ... \     # set this to 0 or 1
+    -npme ... \
     -nb gpu -pme gpu -bonded gpu -update gpu \
     -g ex4.2_${SLURM_NNODES}N_multi${num_multi}_jID${SLURM_JOB_ID} \
     -nsteps -1 -maxh 0.017 -resethway -notunepme
@@ -595,7 +600,7 @@ srun --cpu-bind=${CPU_BIND} ./select_gpu \
 :::warning 
 * How does the performance (ns/day) of _each ensemble member_ simulation change as you increase the number of nodes/GPUs used?
 * How does the aggregate performance per node change as you increase the number of nodes/GPUs used?
-* _Bonus_: observe the GPU utilization using `rocm-smi` during the 1- and 4-node ensemble runs. On LUMI you can do so by launching `watch rocm-smi` in a job that "overlaps" with an existing job running [as described in the LUMI docs](https://docs.lumi-supercomputer.eu/runjobs/scheduled-jobs/interactive/#using-srun-to-check-running-jobs).
+* _Bonus_: observe the GPU utilization using `rocm-smi` during the 1- and 4-node ensemble runs. On LUMI you can do so by launching `watch rocm-smi` in a job that "overlaps" with an existing job running [as described in the LUMI docs](https://docs.lumi-supercomputer.eu/runjobs/scheduled-jobs/interactive/#using-srun-to-check-running-jobs) or in the Exercise 4.1.
 :::
 
 
