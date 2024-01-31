@@ -634,7 +634,7 @@ Sample log files for the exercise session.:
 
 :::info
 **License**
-This material is shared under CC BY-SA 4.0 license.
+This material is shared under CC BY-SA 4.0 license. [DOI:10.5281/zenodo.10556522](https://zenodo.org/doi/10.5281/zenodo.10556522)
 
 ![CC BY-SA](https://hackmd.io/_uploads/SJvv38tuT.png "title" =240x84)
 
